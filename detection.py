@@ -21,27 +21,41 @@ def histEqual(im):
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(16,16))
     for i in range(1):
        im = clahe.apply(im)
-    im = cv2.GaussianBlur(im,(9,9),sigmaX=2,sigmaY=2)
+    # im = cv2.GaussianBlur(im,(9,9),sigmaX=2,sigmaY=2)
     return im
 gray = histEqual(gray)
 cv2.imshow('gray_equ',gray)
+mean = np.mean(gray)
+print(mean)
+th = 2.0
 
 # ## /normal thresholding debug/
 # cv2.namedWindow('thresh')
 # cv2.createTrackbar('ths','thresh',0,80,nothing)
 #
 # while(True):
-#     ths = cv2.getTrackbarPos('ths','thresh')
-#     ret, thresh = cv2.threshold(gray, ths, 255, 0)
+#     th = cv2.getTrackbarPos('ths','thresh')
+#     ret, thresh = cv2.threshold(gray, th, 255, 0)
 #     cv2.imshow('thresh', thresh)
 #     k = cv2.waitKey(1)&0xFF
 #     if k==27:
 #         break
 
+# ## /Canny detection debug /
+# cv2.namedWindow('canny')
+# cv2.createTrackbar('ths1','canny',1,80,nothing)
+# cv2.createTrackbar('ths2','canny',1,80,nothing)
+# while(True):
+#     ths1 = cv2.getTrackbarPos('ths1', 'canny')
+#     ths2 = cv2.getTrackbarPos('ths2', 'canny')
+#     canny = cv2.Canny(gray,ths1,ths2,)
+#     cv2.imshow('canny', canny)
+#     k = cv2.waitKey(1)&0xFF
+#     if k==27:
+#         break
+
 ## /thresholding and finding contours/
-mean = np.mean(gray)
-print(mean)
-th = 1.9
+
 ths = th*mean
 ret, thresh = cv2.threshold(gray, ths, 255, 0)
 cntimg,contours,hierarchy = cv2.findContours(thresh,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
@@ -64,64 +78,95 @@ while(True):
 ## /contour ellipse fit/
 ellipse = cv2.fitEllipse(cnt) #ellipse((x0,y0),(2b,2a),angle),while angle=90,a is horizontal
 cv2.ellipse(img,ellipse,(255,0,0),1)
-x0,y0,b,a=int(ellipse[0][0]),int(ellipse[0][1]),int(ellipse[1][0]/2),int(ellipse[1][1]/2)
 
-xm = 0 #the right edge
-for x in range(x0-a+1,x0):
-    k = -((x-x0)*b*b)/(b*math.sqrt(1-(x-x0)*(x-x0)/(a*a))*a*a)
-    if k<0.8: #angle = 90
-        xm = x
-        break
 
-edge = np.array(cnt)
-i=0
-while i<int(edge.size/2):
-    if edge[i][0][0]>xm:
-        edge = np.delete(edge,i,0)
-    else:
-        i+=1
+## /find right edge/
+def findRightEdge(ellipse,cnt):
+    x0,y0,b,a=int(ellipse[0][0]),int(ellipse[0][1]),int(ellipse[1][0]/2),int(ellipse[1][1]/2)
+    xm = 0 #the right edge
+    for x in range(x0,x0+a-1):
+        k = -((x-x0)*b*b)/(b*math.sqrt(1-(x-x0)*(x-x0)/(a*a))*a*a)
+        if k<-0.8: #angle = 90
+            xm = x
+            break
+
+    edge = np.array(cnt)
+    i=0
+    while i<int(edge.size/2):
+        if edge[i][0][0]<xm:
+            edge = np.delete(edge,i,0)
+        else:
+            i+=1
+    return edge
+
+
+def findLeftEdge(ellipse, cnt):
+    x0, y0, b, a = int(ellipse[0][0]), int(ellipse[0][1]), int(ellipse[1][0] / 2), int(ellipse[1][1] / 2)
+    xm = 0  # the right edge
+    for x in range(x0-a+1, x0):
+        k = -((x - x0) * b * b) / (b * math.sqrt(1 - (x - x0) * (x - x0) / (a * a)) * a * a)
+        if k < 0.8:  # angle = 90
+            xm = x
+            break
+
+    edge = np.array(cnt)
+    i = 0
+    while i < int(edge.size / 2):
+        if edge[i][0][0] > xm:
+            edge = np.delete(edge, i, 0)
+        else:
+            i += 1
+    return edge
 
 ## /circle fit/
-x,y=edge[:,0,0],edge[:,0,1]
-x_m,y_m=np.mean(x),np.mean(y)
+def circlefit(edge):
+    x,y=edge[:,0,0],edge[:,0,1]
+    x_m,y_m=np.mean(x),np.mean(y)
 
-def calc_R(xc, yc):
-    return np.sqrt((x-xc)**2 + (y-yc)**2)
+    def calc_R(xc, yc):
+        return np.sqrt((x-xc)**2 + (y-yc)**2)
 
-def f_2(c):
-    Ri = calc_R(*c)
-    return Ri - np.mean(Ri)
+    def f_2(c):
+        Ri = calc_R(*c)
+        return Ri - np.mean(Ri)
 
-center_estimate = x_m,y_m
-center_2, ier = optimize.leastsq(f_2,center_estimate)
+    center_estimate = x_m,y_m
+    center_2, ier = optimize.leastsq(f_2,center_estimate)
 
-xc_2, yc_2 = center_2
-Ri_2       = calc_R(*center_2)
-R_2        = int(np.mean(Ri_2))
-residu_2   = sum((Ri_2 - R_2)**2)
-
-xc_2,yc_2 = int(xc_2),int(yc_2)
-cv2.circle(img,(xc_2,yc_2),R_2,(255,255,255),2)
+    xc_2, yc_2 = center_2
+    Ri_2       = calc_R(*center_2)
+    R_2        = np.mean(Ri_2)
+    residu_2   = sum((Ri_2 - R_2)**2)
+    return int(xc_2),int(yc_2),int(R_2)
 
 
-# ## /mouse callback/
-# def on_EVENT_LBUTTONDOWN(event, x, y, flags, param):
-#     if event == cv2.EVENT_LBUTTONDOWN:
-#         xy = "%d,%d" % (x, y)
-#         print(xy)
-#         cv2.circle(img, (x, y), 1, (0, 0, 255), thickness = -1)
-#         cv2.putText(img, xy, (x, y), cv2.FONT_HERSHEY_PLAIN,
-#                     1.0, (0,0,255), thickness = 1)
-#         cv2.imshow("contour0",img)
-#
-# cv2.namedWindow('contour0')
-# cv2.setMouseCallback('contour0', on_EVENT_LBUTTONDOWN)
-# cv2.imshow('contour0', img)
-#
-# while(True):
-#     k = cv2.waitKey(1)&0xFF
-#     if k==27:
-#         break
+rightEdge = findRightEdge(ellipse,cnt)
+leftEdge = findLeftEdge(ellipse,cnt)
+xc_r,yc_r,R_r = circlefit(rightEdge)
+xc_l,yc_l,R_l = circlefit(leftEdge)
+cv2.circle(img,(xc_r,yc_r),R_r,(255,255,255),2)
+cv2.circle(img,(xc_l,yc_l),R_l,(255,255,255),2)
+cv2.imshow('img',img)
+
+
+## /mouse callback/
+def on_EVENT_LBUTTONDOWN(event, x, y, flags, param):
+    if event == cv2.EVENT_LBUTTONDOWN:
+        xy = "%d,%d" % (x, y)
+        print(xy)
+        cv2.circle(img, (x, y), 1, (0, 0, 255), thickness = -1)
+        cv2.putText(img, xy, (x, y), cv2.FONT_HERSHEY_PLAIN,
+                    1.0, (0,0,255), thickness = 1)
+        cv2.imshow("contour0",img)
+
+cv2.namedWindow('contour0')
+cv2.setMouseCallback('contour0', on_EVENT_LBUTTONDOWN)
+cv2.imshow('contour0', img)
+
+while(True):
+    k = cv2.waitKey(1)&0xFF
+    if k==27:
+        break
 
 # ## /filling /
 # ROI = np.zeros(img.shape,np.uint8)
@@ -139,20 +184,9 @@ cv2.circle(img,(xc_2,yc_2),R_2,(255,255,255),2)
 #     if k==27:
 #         break
 #
-# ## /Canny detection debug /
-# cv2.namedWindow('canny')
-# cv2.createTrackbar('ths1','canny',1,80,nothing)
-# cv2.createTrackbar('ths2','canny',1,80,nothing)
-# while(True):
-#     ths1 = cv2.getTrackbarPos('ths1', 'canny')
-#     ths2 = cv2.getTrackbarPos('ths2', 'canny')
-#     canny = cv2.Canny(img_cut,ths1,ths2,)
-#     cv2.imshow('canny', canny)
-#     k = cv2.waitKey(1)&0xFF
-#     if k==27:
-#         break
 
-# canny = cv2.Canny(img_cut,10,22)
+
+#
 #
 # ## /dilation and erode /
 # # kernel1 = np.ones((5,5),np.uint8)
